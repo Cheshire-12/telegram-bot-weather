@@ -2,6 +2,8 @@ from email.mime import message
 import os
 import telebot
 import requests
+import time
+import functools
 from telebot import types
 from dotenv import load_dotenv
 from cities import CITIES
@@ -15,6 +17,18 @@ else:
     print(f"YANDEX_WEATHER_API_KEY успешно загружен.")
 bot = telebot.TeleBot(API_TOKEN)
 
+# Декоратор для замера времени выполнения функции
+def log_function_call(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        stop_time = time.time()
+        execution_time = stop_time - start_time
+        print(f'Функция {func.__name__} выполнена за {round(execution_time, 3)} секунд')
+        return result
+    return wrapper
+
 # Яндкес погода
 WEATHER_CONDITIONS = {
     'clear': 'Ясно ☀️', 'partly-cloudy': 'Малооблачно 🌤', 'cloudy': 'Облачно ⛅️',
@@ -24,6 +38,7 @@ WEATHER_CONDITIONS = {
 }
 
 # Функция для получения погоды
+@log_function_call
 def get_weather(lat, lon, city_name="выбранном месте"):
     url = "https://api.weather.yandex.ru/v2/forecast"
     headers = {"X-Yandex-Weather-Key": YANDEX_WEATHER_API_KEY}
@@ -43,6 +58,7 @@ def get_weather(lat, lon, city_name="выбранном месте"):
     except Exception as e:
         print(f"Ошибка: {e}")
         return "Упс, метеослужба временно не отвечает 😵‍💫"
+    
 
 # Функция для создания клавиатуры с городами
 def get_cities_keyboard():
