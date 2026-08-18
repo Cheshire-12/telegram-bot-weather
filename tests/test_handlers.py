@@ -7,20 +7,20 @@ import handlers
 import keyboards
 
 
-def make_message(text=None, chat_id=123):
+def make_message(text=None, chat_id=123, language_code="ru"):
     return SimpleNamespace(
-        from_user=SimpleNamespace(first_name="Иван", last_name=None),
+        from_user=SimpleNamespace(first_name="Иван", last_name=None, language_code=language_code),
         chat=SimpleNamespace(id=chat_id),
         text=text,
     )
 
 
-def make_call(callback_data, message_id=42):
+def make_call(callback_data, message_id=42, chat_id=123, language_code="ru"):
     return SimpleNamespace(
         data=callback_data,
         id="cb123",
-        from_user=SimpleNamespace(first_name="Иван", last_name=None, id=1),
-        message=SimpleNamespace(chat=SimpleNamespace(id=123), message_id=message_id),
+        from_user=SimpleNamespace(first_name="Иван", last_name=None, id=1, language_code=language_code),
+        message=SimpleNamespace(chat=SimpleNamespace(id=chat_id), message_id=message_id),
     )
 
 
@@ -43,7 +43,7 @@ def fake_bot(monkeypatch):
 
 
 def test_city_selection_edits_message(fake_bot, monkeypatch):
-    monkeypatch.setattr(handlers, "get_weather", lambda lat, lon, name: f"Погода в {name}")
+    monkeypatch.setattr(handlers, "get_weather", lambda lat, lon, name, lang: f"Погода в {name}")
     fake_bot.answer_callback_query.return_value = None
 
     handlers.handle_query(make_call("city_kirov"))
@@ -52,6 +52,21 @@ def test_city_selection_edits_message(fake_bot, monkeypatch):
     fake_bot.edit_message_text.assert_called_once()
     text = fake_bot.edit_message_text.call_args.args[0]
     assert "Погода в Киров" in text
+
+
+def test_city_selection_localized_name_and_lang(fake_bot, monkeypatch):
+    captured = {}
+    def fake_weather(lat, lon, name, lang):
+        captured["name"] = name
+        captured["lang"] = lang
+        return f"Погода в {name}"
+    monkeypatch.setattr(handlers, "get_weather", fake_weather)
+    fake_bot.answer_callback_query.return_value = None
+
+    handlers.handle_query(make_call("city_moscow", language_code="ja"))
+
+    assert captured["name"] == "モスクワ"
+    assert captured["lang"] == "ja"
 
 
 def test_city_selection_unknown_city_does_nothing(fake_bot):
@@ -73,10 +88,31 @@ def test_go_back_returns_to_menu(fake_bot):
     fake_bot.edit_message_text.assert_called_once()
 
 
+def test_page_next_advances_page(fake_bot):
+    handlers.handle_query(make_call("page_next", chat_id=999))
+    fake_bot.edit_message_text.assert_called_once()
+    kwargs = fake_bot.edit_message_text.call_args.kwargs
+    assert "reply_markup" in kwargs
+    assert handlers.PAGE_STATE.get(999) == 1
+
+
+def test_page_prev_returns_page(fake_bot):
+    handlers.PAGE_STATE[999] = 2
+    handlers.handle_query(make_call("page_prev", chat_id=999))
+    assert handlers.PAGE_STATE.get(999) == 1
+
+
+def test_page_state_reset_between_chats(fake_bot):
+    handlers.PAGE_STATE[100] = 3
+    handlers.handle_query(make_call("page_next", chat_id=200))
+    assert handlers.PAGE_STATE.get(200) == 1
+    assert handlers.PAGE_STATE.get(100) == 3
+
+
 def test_location_sends_weather(fake_bot, monkeypatch):
-    monkeypatch.setattr(handlers, "get_weather", lambda lat, lon, name: "погода в месте")
+    monkeypatch.setattr(handlers, "get_weather", lambda lat, lon, name, lang: "погода в месте")
     message = SimpleNamespace(
-        from_user=SimpleNamespace(first_name="Иван", last_name="Петров"),
+        from_user=SimpleNamespace(first_name="Иван", last_name="Петров", language_code="ru"),
         chat=SimpleNamespace(id=123),
         location=SimpleNamespace(latitude=55.7558, longitude=37.6173),
     )
@@ -87,6 +123,12 @@ def test_location_sends_weather(fake_bot, monkeypatch):
 def test_unknown_text_replies_with_keyboard(fake_bot):
     handlers.echo_all(make_message("непонятно"))
     fake_bot.reply_to.assert_called_once()
+
+
+def test_unknown_text_localized(fake_bot):
+    handlers.echo_all(make_message("непонятно", language_code="en"))
+    text = fake_bot.reply_to.call_args.args[1]
+    assert "I didn't quite get that" in text
 
 
 def test_other_types_send_hint(fake_bot):
